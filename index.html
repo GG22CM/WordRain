@@ -191,7 +191,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     for (var i = 0; i < count; i++) {
       pos[i * 3] = (Math.random() - 0.5) * 104;     // x：铺满河面横向（含屏幕两侧）
       pos[i * 3 + 1] = -0.5 - Math.random() * 5;    // y：紧贴水面下方（浅，像水面的倒影）
-      pos[i * 3 + 2] = 8 - Math.random() * 32;      // z：近(屏幕下方)到远，铺满整片可见河面
+      pos[i * 3 + 2] = 14 - Math.random() * 38;     // z：近(贴近相机→屏幕最底部)到远，铺满整片可见河面含底部
       spd[i] = -0.55 + Math.random() * 1.1;         // 每颗星速度各不相同
     }
     var g = new THREE.BufferGeometry();
@@ -243,18 +243,18 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     return tex;
   }
 
-  var MAX_DROPS = isMobile ? 100 : 160;
+  var MAX_DROPS = isMobile ? 130 : 200;
   var GHOST_MAX = isMobile ? 80 : 100;
   var drops = [];
   var ghosts = [];
 
   function Drop(ch) {
     this.ch = ch;
-    this.x = rand(-14, 14);
+    this.x = rand(-16, 16);                // 铺满更宽的天空横向
     this.z = rand(-11, 8);                 // 纵深：远(-) 到 近(+)，落点有足够扩散空间
-    this.y = rand(9, 13.5);
-    this.vy = rand(2.5, 6.5);
-    this.gravity = rand(9, 14);
+    this.y = rand(3, 18);                  // 高度贯穿整片天空（低到高），不留下部空白
+    this.vy = rand(1.5, 4);                // 下落更慢：雨滴在空中停留更久，铺满天空
+    this.gravity = rand(8, 12);
     this.opacity = rand(0.8, 1);
     this.trail = [];
     this.nextGhost = 0;
