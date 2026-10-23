@@ -300,7 +300,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   }
 
   /* ===== 涟漪：波峰环带（Mesh 圆环，有宽度、发光、配合 Bloom） ===== */
-  var ringGeo = new THREE.RingGeometry(0.84, 1.0, 72);   // 单位环带（内外半径）
+  var ringGeo = new THREE.RingGeometry(0.92, 1.0, 72);   // 单位环带（很窄：波峰带细、波谷空隙大）
   ringGeo.rotateX(-Math.PI / 2);                          // 转到水平 XZ 平面
   ringGeo.computeVertexNormals();
 
@@ -309,12 +309,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   function addRipple(d) {
     // 水滴"大小"按纵深映射：近处(z大)=大滴 → 波峰环数多、波纹带更大
     var sf = THREE.MathUtils.clamp((d.z + 11) / 19, 0, 1);
-    var rings = 1 + Math.round(sf * 3);         // 波峰环数：小滴 1，大滴最多 4
-    var wavelength = 3.0;                        // 波峰间距：固定波长，环与环间隔清晰（不黏连）
-    var targetR = 5 + sf * 16;                   // 波纹带目标外沿半径
+    var rings = 1 + Math.round(sf * 2);         // 波峰环数：小滴 1，大滴最多 3（间距清晰不黏）
+    var wavelength = 4.5;                        // 波峰间距大：环与环之间有明显波谷空隙
+    var targetR = 8 + sf * 22;                   // 波纹带目标外沿半径（大，扩散得远）
     var boundary = Math.min(48 - Math.abs(d.x), 20 - Math.abs(d.z)); // 到水面边界距离
     var maxR = Math.min(targetR, boundary);      // 外沿最大半径（到边界即消散）
-    var speed = rand(2.6, 3.8);                  // 波纹带外扩速度
+    var speed = rand(1.6, 2.6);                  // 外扩速度慢：波纹从中心缓慢扩散，过程清晰可见
+    if (ripples.length > 48) removeRipple(0);    // 限制波纹数量，防堆积
     var r = { age: 0, x: d.x, z: d.z, radius: 0, speed: speed, wavelength: wavelength, rings: rings, maxR: maxR, loops: [] };
     for (var i = 0; i < rings; i++) {
       var mat = new THREE.MeshBasicMaterial({
@@ -341,10 +342,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         if (rr <= 0.3) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
         r.loops[j].visible = true;
         r.loops[j].scale.set(rr, rr, 1);
-        var falloff = Math.pow(0.7, j);          // 内圈波峰渐暗（真实波纹衰减）
+        var falloff = Math.pow(0.55, j);         // 最外波峰(传播前沿)最亮，尾波快速渐暗 → 波浪推进感
         // 波纹带传播的前 65% 保持清晰，接近水面边界(目标)的最后 35% 渐隐直至消散
         var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.65 * r.maxR) / (0.35 * r.maxR), 0, 1);
-        r.loops[j].material.opacity = Math.max(0, 0.5 * falloff * fade);
+        r.loops[j].material.opacity = Math.max(0, 0.55 * falloff * fade);
       }
       if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
