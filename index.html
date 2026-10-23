@@ -342,11 +342,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         if (rr <= 0.3) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
         r.loops[j].visible = true;
         r.loops[j].scale.set(rr, 1, rr);   // 修正：缩放 x 与 z（y 恒 0），正圆等比扩散，投影恒定椭圆
-        // 能量随传播衰减：半径占目标比例越大(扩散越远)整体越暗，到边界降为 0
+        // 能量随传播衰减：刚落到水面(radius 小)最亮，扩散越远越暗，到边界降为 0 —— 越扩散越暗
         var decay = 1 - Math.min(r.radius / r.maxR, 1);
-        // 同一涟漪内：先传播的外圈更暗、后波峰(内圈)稍亮 → 越向外越暗
-        var falloff = Math.pow(0.6, r.loops.length - 1 - j);
-        r.loops[j].material.opacity = Math.max(0, 0.38 * decay * falloff);
+        // 外圈(扩散前沿)略亮、内圈稍暗，保持波浪向外推进感（差异轻微，不掩盖整体衰减）
+        var falloff = 1 - 0.35 * (j / Math.max(1, r.loops.length - 1));
+        r.loops[j].material.opacity = Math.max(0, 0.36 * decay * falloff);
       }
       if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
