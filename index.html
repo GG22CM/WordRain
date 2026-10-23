@@ -152,8 +152,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
   /* ===== 场景 / 渲染 ===== */
   var container = document.getElementById('gl');
-  var renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.25 : 1.5));
+  var renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.0 : 1.25));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
   renderer.domElement.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;display:block;pointer-events:none;z-index:0;';
@@ -188,10 +188,31 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     });
     return new THREE.Points(g, m);
   }
-  var stars = buildStars(isMobile ? 900 : 1500, 0.32, 0xcfe4ff, 0.9);
+  var stars = buildStars(isMobile ? 800 : 1000, 0.32, 0xcfe4ff, 0.9);
   scene.add(stars);
   var brightStars = buildStars(120, 0.7, 0xe8f1ff, 0.9);
   scene.add(brightStars);
+
+  /* 星空倒影：镜像一份星空到水面下方（y 取负），随主星空同步旋转 */
+  function mirrorPoints(srcPoints, opacity) {
+    var arr = srcPoints.geometry.attributes.position.array;
+    var pos = new Float32Array(arr.length);
+    for (var i = 0; i < arr.length; i += 3) {
+      pos[i] = arr[i]; pos[i + 1] = -arr[i + 1]; pos[i + 2] = arr[i + 2];
+    }
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    var m = new THREE.PointsMaterial({
+      color: 0xbfd6ff, size: srcPoints.material.size * 0.9,
+      transparent: true, opacity: opacity,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+    });
+    return new THREE.Points(g, m);
+  }
+  var starsMirror = mirrorPoints(stars, 0.30);
+  var brightMirror = mirrorPoints(brightStars, 0.42);
+  scene.add(starsMirror);
+  scene.add(brightMirror);
 
   /* ===== 文字雨滴 Sprite 系统 ===== */
   var texCache = new Map();
@@ -214,8 +235,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     return tex;
   }
 
-  var MAX_DROPS = isMobile ? 140 : 220;
-  var GHOST_MAX = isMobile ? 120 : 180;
+  var MAX_DROPS = isMobile ? 100 : 160;
+  var GHOST_MAX = isMobile ? 80 : 100;
   var drops = [];
   var ghosts = [];
   var RIPPLE_MAX = 16;
@@ -271,7 +292,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     var g = { sprite: gs, born: t, base: d.opacity * 0.5, life: 0.5 };
     d.trail.push(g);
     ghosts.push(g);
-    if (d.trail.length > 5) { removeSprite(d.trail.shift().sprite); }
+    if (d.trail.length > 3) { removeSprite(d.trail.shift().sprite); }
   }
 
   function removeSprite(sp) {
@@ -296,6 +317,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     uniform vec3 uRipples[16];
     uniform int uRippleCount;
     varying float vDisp;
+    varying vec2 vWorldPos;
     void main() {
       vec3 pos = position;
       float disp = 0.0;
@@ -308,28 +330,33 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         float rad = t * 8.0;
         float env = exp(-(d * d) / (rad * rad * 0.55));
         float wave = sin(rad * 2.8 - t * 12.0);
-        disp += env * wave * 0.42 * (1.0 - t / 1.4);
+        disp += env * wave * 0.32 * (1.0 - t / 1.4);
       }
       pos.y = disp;
       vDisp = disp;
+      vWorldPos = pos.xz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
   `;
   var waterFrag = /* glsl */`
     uniform float uTime;
     varying float vDisp;
+    varying vec2 vWorldPos;
     void main() {
-      vec3 deep = vec3(0.045, 0.09, 0.16);
-      vec3 shallow = vec3(0.16, 0.26, 0.42);
-      vec3 col = mix(deep, shallow, smoothstep(-0.35, 0.35, vDisp));
-      float shimmer = 0.10 * sin(vDisp * 6.0 + uTime * 2.2);
-      col += vec3(shimmer, shimmer * 0.85, shimmer * 0.6);
-      col += vec3(0.32, 0.36, 0.5) * max(0.0, vDisp) * 1.4;
-      gl_FragColor = vec4(col, 1.0);
+      // 深蓝黑水面，接近夜空背景，无彩色、无闪光
+      vec3 base = vec3(0.028, 0.045, 0.075);
+      float glow = max(0.0, vDisp);
+      // 涟漪：仅极低强度的微光扰动（非彩色高光）
+      vec3 col = base + vec3(0.30, 0.34, 0.40) * glow * 0.20;
+      // 边缘淡出：中央半透明，四周渐隐，避免与夜空产生分界线
+      float dist = length(vWorldPos);
+      float fade = smoothstep(52.0, 34.0, dist);
+      float alpha = 0.45 * clamp(fade, 0.0, 1.0);
+      gl_FragColor = vec4(col, alpha);
     }
   `;
 
-  var waterGeo = new THREE.PlaneGeometry(96, 40, 96, 40);
+  var waterGeo = new THREE.PlaneGeometry(96, 40, 64, 28);
   waterGeo.rotateX(-Math.PI / 2);       // 变为水平 XZ 平面，y=0
   var waterMat = new THREE.ShaderMaterial({
     uniforms: waterUniforms,
@@ -346,9 +373,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   composer.addPass(new RenderPass(scene, camera));
   var bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    isMobile ? 0.55 : 0.9,   // strength
-    0.7,                       // radius
-    0.12                       // threshold
+    isMobile ? 0.35 : 0.6,   // strength
+    0.6,                       // radius
+    0.18                       // threshold
   );
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
@@ -369,9 +396,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     var dt = clock.getDelta();
     var t = clock.elapsedTime;
 
-    // 星空缓慢旋转
+    // 星空缓慢旋转（主星空 + 下方倒影同步）
     stars.rotation.y = t * 0.008;
     brightStars.rotation.y = t * 0.012;
+    starsMirror.rotation.y = t * 0.008;
+    brightMirror.rotation.y = t * 0.012;
 
     // 涟漪 uniform 更新
     waterUniforms.uTime.value = t;
@@ -398,8 +427,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       }
       d.sprite.position.set(d.x, d.y, d.z);
 
-      // 残影拖尾采样
-      if (t - d.nextGhost > 0.05) {
+      // 残影拖尾采样（降频以省 draw call）
+      if (t - d.nextGhost > 0.09) {
         d.nextGhost = t;
         addGhost(d, t);
       }
