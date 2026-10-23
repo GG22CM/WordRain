@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文字雨 · Text Rain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' fill='%23000'/%3E%3Cpath d='M8 4l1.6 3H13l-3.6 1.4L10.6 11 6 8.6l2.3 4.6L6 13l4-6.5L11.5 4z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #000;
+    --fg: #fff;
+    --muted: rgba(255,255,255,.35);
+    --dim: rgba(255,255,255,.12);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    /* 方案A：极光星夜 —— 深蓝黑渐变夜空 */
+    background:
+      radial-gradient(140% 100% at 50% -12%, #12204a 0%, #0a1030 30%, #05070f 66%, #000 100%);
+    color: var(--fg);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 顶部极淡极光带（低透明度，克制冷峻） */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(55% 38% at 28% 0%, rgba(120,200,185,.16), transparent 62%),
+      radial-gradient(48% 32% at 72% 6%, rgba(135,155,255,.14), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 雨滴演出层：固定全屏、不挡交互 */
+  #rain {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 前景舞台：垂直水平居中 */
+  .stage {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 24px 5vw;
+  }
+
+  /* 记事本风格：左对齐、隐藏滚动条但仍可滚动 */
+  /* 输入框：完全无边框、纯沉浸，文字带柔和呼吸灯 */
+  textarea#editor {
+    width: min(1100px, 92vw);
+    height: 58vh;
+    min-height: 240px;
+    resize: none;
+    overflow-y: auto;
+    scrollbar-width: none;                /* Firefox 隐藏滚动条 */
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #ffffff;
+    caret-color: #cfe8ff;
+    text-shadow: 0 0 10px rgba(160,205,255,.35);
+    font-family: inherit;
+    font-size: 26px;
+    line-height: 2;
+    text-align: left;
+    padding: 18px 20px;
+    animation: breathe 4.5s ease-in-out infinite;
+  }
+  /* 柔和呼吸灯：文字微光缓慢起伏，灵动活泼 */
+  @keyframes breathe {
+    0%, 100% { text-shadow: 0 0 5px rgba(155,205,255,.25), 0 0 12px rgba(150,200,255,.14); }
+    50%      { text-shadow: 0 0 11px rgba(170,215,255,.55), 0 0 26px rgba(160,205,255,.32); }
+  }
+  textarea#editor::-webkit-scrollbar { display: none; }  /* Chrome/Safari 隐藏滚动条 */
+  textarea#editor::placeholder {
+    color: rgba(200,220,255,.26);
+    text-shadow: none;
+    animation: none;
+  }
+  textarea#editor:focus { outline: none; box-shadow: none; border: none; }
+  /* 尊重系统减少动态偏好：关闭呼吸灯 */
+  @media (prefers-reduced-motion: reduce) {
+    textarea#editor { animation: none; }
+  }
+
+  /* 提示 toast */
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 34px;
+    transform: translateX(-50%) translateY(8px);
+    color: var(--fg);
+    background: rgba(120,170,235,.12);
+    border: 1px solid rgba(150,205,255,.28);
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s ease, transform .3s ease;
+    z-index: 2;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 左下角操作提示 */
+  .hint {
+    position: fixed;
+    left: 16px;
+    bottom: 14px;
+    z-index: 1;
+    font-size: 12px;
+    letter-spacing: .08em;
+    color: rgba(190,215,255,.35);
+    pointer-events: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+  }
+
+  /* 尊重系统减少动态偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    #rain { display: none; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="rain" aria-hidden="true"></canvas>
+
+  <main class="stage">
+    <textarea id="editor" spellcheck="false" autocomplete="off"
+      placeholder="输入文字，它会化作雨滴落下……"></textarea>
+  </main>
+
+  <div id="toast" role="status"></div>
+  <div class="hint" aria-hidden="true">输入文字 → 化作雨滴落下 · Ctrl+S 保存为 .txt</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ===== 雨滴演出层（Canvas 粒子系统） ===== */
+  var canvas = document.getElementById('rain');
+  var ctx = canvas.getContext('2d');
+  var editor = document.getElementById('editor');
+  var toast = document.getElementById('toast');
+
+  var DPR = Math.min(window.devicePixelRatio || 1, 2);
+  var W = 0, H = 0, waterTop = 0, waterBottom = 0;
+  var drops = [];
+  var ripples = [];
+  var stars = [];
+  var MAX_DROPS = 320;
+  var MAX_RIPPLES = 420;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+
+  // 生成星空（随窗口尺寸重建）：更密、更大、部分亮星带辉光
+  function initStars() {
+    stars = [];
+    var count = Math.max(50, Math.min(200, Math.round((W * H) / 9000)));
+    for (var i = 0; i < count; i++) {
+      var bright = Math.random() < 0.22;   // 约 1/5 亮星
+      stars.push({
+        x: rand(0, W),
+        y: rand(0, H),
+        r: bright ? rand(1.4, 2.4) : rand(0.6, 1.6),
+        base: bright ? rand(0.75, 1) : rand(0.45, 0.85),
+        glow: bright,
+        speed: rand(0.4, 1.6),
+        phase: rand(0, Math.PI * 2)
+      });
+    }
+  }
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    waterTop = H - 150;                          // 湖水区上缘（远景水面）
+    waterBottom = H - 20;                        // 落点最深处（近景）
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    initStars();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function Drop(ch) {
+    this.ch = ch;
+    this.x = rand(0, W);
+    this.y = rand(-H * 0.35, -20);
+    this.depth = rand(0, 1);                    // 纵深：0 远(小) ~ 1 近(大)
+    this.size = 18 + 20 * this.depth;           // 近处雨滴大，远处雨滴小
+    this.scale = 0.72 + 0.5 * this.depth;       // 涟漪近大远小
+    this.targetY = waterTop + this.depth * (waterBottom - waterTop); // 近(大滴)靠下，远(小滴)靠上
+    this.vy = rand(40, 110);                    // 初始下落速度 px/s
+    this.gravity = rand(760, 1150);             // 重力加速度 px/s²，越落越快
+    this.vx = rand(-16, 16);                    // 轻微横向风
+    this.opacity = rand(0.85, 1);
+    this.trail = [];                            // 残影轨迹（流动拖尾）
+  }
+
+  // 水面涟漪：水平扁椭圆波环，带纵深缩放
+  function Ripple(x, y, scale) {
+    this.x = x;
+    this.y = y;
+    this.r = 6;
+    this.life = 1;
+    this.scale = scale;
+  }
+
+  // 触发：把新增文字逐字符生成雨滴（跳过所有空白字符）
+  function spawnLine(text) {
+    var chars = Array.from(text);
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i];
+      if (/\s/.test(c)) continue;                   // 空白字符（空格/换行/制表/全角空格等）不触发
+      if (drops.length >= MAX_DROPS) drops.shift(); // 超限回收最早一批
+      drops.push(new Drop(c));
+    }
+  }
+
+  var lastTime = null;
+  function frame(now) {
+    if (lastTime === null) lastTime = now;
+    var dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // 星空：微弱闪烁
+    var tSec = now / 1000;
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s];
+      var sa = st.base * (0.5 + 0.5 * Math.sin(tSec * st.speed + st.phase));
+      ctx.globalAlpha = Math.max(0.12, Math.min(1, sa));
+      ctx.shadowColor = 'rgba(190,220,255,0.9)';
+      ctx.shadowBlur = st.glow ? 9 : 0;
+      ctx.fillStyle = st.glow ? '#e8f1ff' : '#cfe4ff';
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 底部湖水区：极淡蓝渐变（纵深水面区域）
+    var wg = ctx.createLinearGradient(0, waterTop, 0, H);
+    wg.addColorStop(0, 'rgba(70,130,215,0)');
+    wg.addColorStop(1, 'rgba(60,120,200,0.13)');
+    ctx.fillStyle = wg;
+    ctx.fillRect(0, waterTop, W, H - waterTop);
+    ctx.strokeStyle = 'rgba(170,215,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, waterTop);
+    ctx.lineTo(W, waterTop);
+    ctx.stroke();
+
+    // 雨滴：重力加速下落 → 没入水面即刻消失，只留涟漪
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+
+      d.vy += d.gravity * dt;   // 重力加速度，越落越快
+      d.y += d.vy * dt;
+      d.x += d.vx * dt;
+
+      if (d.y >= d.targetY) {   // 没入水面：按纵深泛起涟漪，文字即刻消失
+        ripples.push(new Ripple(d.x, d.targetY, d.scale));
+        if (ripples.length > MAX_RIPPLES) ripples.shift();
+        drops.splice(i, 1);
+        continue;
+      }
+
+      // 残影轨迹（流动拖尾）
+      d.trail.push({ x: d.x, y: d.y });
+      if (d.trail.length > 14) d.trail.shift();
+      var tl = d.trail.length;
+      for (var j = 0; j < tl; j++) {
+        var tp = d.trail[j];
+        var tA = d.opacity * (j / tl) * 0.5;
+        if (tA <= 0.02) continue;
+        ctx.save();
+        ctx.translate(tp.x, tp.y);
+        ctx.globalAlpha = Math.min(1, tA);
+        ctx.fillStyle = '#bfe0ff';
+        ctx.font = Math.max(7, d.size * (0.35 + 0.65 * (j / tl))) + 'px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif';
+        ctx.fillText(d.ch, 0, 0);
+        ctx.restore();
+      }
+
+      // 文字本体 + 柔和辉光（不自旋，竖直下落，近大远小）
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.globalAlpha = d.opacity;
+      ctx.shadowColor = 'rgba(150,205,255,0.85)';
+      ctx.shadowBlur = d.size * 0.9;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = d.size + 'px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillText(d.ch, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    // 水面涟漪：水平椭圆波环，按纵深近大远小扩散
+    for (var r = ripples.length - 1; r >= 0; r--) {
+      var rp = ripples[r];
+      rp.r += 150 * rp.scale * dt;
+      rp.life -= dt * 1.1;
+      if (rp.life <= 0 || rp.r > 120 * rp.scale) { ripples.splice(r, 1); continue; }
+      var ralpha = rp.life * (0.45 + 0.4 * rp.scale);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(200,230,255,' + ralpha.toFixed(3) + ')';
+      ctx.lineWidth = 2.2 * rp.life * rp.scale;
+      ctx.shadowColor = 'rgba(150,210,255,' + (ralpha * 0.8).toFixed(3) + ')';
+      ctx.shadowBlur = 8 * rp.scale;
+      ctx.beginPath();
+      ctx.ellipse(rp.x, rp.y, rp.r * 2.4, rp.r * 0.55, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
+    if (!reduceMotion) requestAnimationFrame(frame);
+  }
+
+  // 键盘：Ctrl/Cmd+S 保存（回车由 textarea 默认换行；雨滴改为输入即触发）
+  editor.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveToTxt();
+    }
+  });
+
+  // 输入即触发：中文与英文均即时触发（空白字符不触发）
+  var lastValue = editor.value;
+  // 中文输入：选字上屏（compositionend）时立即触发；拼音编辑中不更新基准值
+  editor.addEventListener('compositionend', function () {
+    var v = editor.value;
+    if (!reduceMotion && v.length > lastValue.length) {
+      spawnLine(v.slice(lastValue.length));
+    }
+    lastValue = v;
+  });
+  // 英文/粘贴/Shift确认字母等普通输入：用 e.data 精确拿到本次插入文本并触发
+  editor.addEventListener('input', function (e) {
+    if (e.isComposing) return;              // 拼音编辑中：跳过，不更新基准值
+    var data = e.data;
+    if (!reduceMotion && data) {
+      spawnLine(data);
+    }
+    lastValue = editor.value;
+  });
+
+  /* ===== 保存功能：下载 .txt ===== */
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function timestamp() {
+    var d = new Date();
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+      '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () { toast.classList.remove('show'); }, 2200);
+  }
+
+  function saveToTxt() {
+    var text = editor.value;
+    if (!text.trim()) {
+      showToast('输入为空，先写点字再保存');
+      return;
+    }
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '文字雨_' + timestamp() + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    showToast('已保存：' + a.download);
+  }
+
+  // 启动动画循环（非 reduced-motion 时）
+  if (!reduceMotion) requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
