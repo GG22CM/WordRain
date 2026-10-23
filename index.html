@@ -317,7 +317,6 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     uniform vec3 uRipples[16];
     uniform int uRippleCount;
     varying float vDisp;
-    varying vec2 vWorldPos;
     void main() {
       vec3 pos = position;
       float disp = 0.0;
@@ -334,24 +333,20 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       }
       pos.y = disp;
       vDisp = disp;
-      vWorldPos = pos.xz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
   `;
   var waterFrag = /* glsl */`
     uniform float uTime;
     varying float vDisp;
-    varying vec2 vWorldPos;
     void main() {
-      // 深蓝黑水面，接近夜空背景，无彩色、无闪光
-      vec3 base = vec3(0.028, 0.045, 0.075);
+      // 水面颜色与夜空背景一致（#05070f），本身完全透明、无边框
+      vec3 base = vec3(0.02, 0.03, 0.05);
       float glow = max(0.0, vDisp);
-      // 涟漪：仅极低强度的微光扰动（非彩色高光）
-      vec3 col = base + vec3(0.30, 0.34, 0.40) * glow * 0.20;
-      // 边缘淡出：中央半透明，四周渐隐，避免与夜空产生分界线
-      float dist = length(vWorldPos);
-      float fade = smoothstep(52.0, 34.0, dist);
-      float alpha = 0.45 * clamp(fade, 0.0, 1.0);
+      // 仅涟漪隆起瞬间产生极低调微光，其余全透明 → 无颜色、无边框，倒影直接透出
+      float vis = smoothstep(0.0, 0.08, glow);
+      vec3 col = base + vec3(0.35, 0.38, 0.45) * glow * 0.35;
+      float alpha = 0.5 * vis;
       gl_FragColor = vec4(col, alpha);
     }
   `;
@@ -362,7 +357,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     uniforms: waterUniforms,
     vertexShader: waterVert,
     fragmentShader: waterFrag,
-    side: THREE.DoubleSide
+    side: THREE.FrontSide,
+    transparent: true,
+    depthWrite: false
   });
   var water = new THREE.Mesh(waterGeo, waterMat);
   water.position.y = 0;
