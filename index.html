@@ -299,20 +299,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     if (sp.material) sp.material.dispose();
   }
 
-  /* ===== 涟漪：多圈环形线条（按水滴大小决定圈数，扩散至水面边界消散） ===== */
-  var CIRCLE_SEG = 48;
-  var circleGeo = (function () {
-    var pos = new Float32Array(CIRCLE_SEG * 3);
-    for (var i = 0; i < CIRCLE_SEG; i++) {
-      var a = (i / CIRCLE_SEG) * Math.PI * 2;
-      pos[i * 3] = Math.cos(a);
-      pos[i * 3 + 1] = 0;
-      pos[i * 3 + 2] = Math.sin(a);
-    }
-    var g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    return g;
-  })();
+  /* ===== 涟漪：波峰环带（Mesh 圆环，有宽度、发光、配合 Bloom） ===== */
+  var ringGeo = new THREE.RingGeometry(0.84, 1.0, 72);   // 单位环带（内外半径）
+  ringGeo.rotateX(-Math.PI / 2);                          // 转到水平 XZ 平面
+  ringGeo.computeVertexNormals();
 
   var ripples = [];                 // 活跃涟漪（线条）
 
@@ -327,13 +317,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     var speed = rand(2.6, 3.8);                  // 波纹带外扩速度
     var r = { age: 0, x: d.x, z: d.z, radius: 0, speed: speed, wavelength: wavelength, rings: rings, maxR: maxR, loops: [] };
     for (var i = 0; i < rings; i++) {
-      var mat = new THREE.LineBasicMaterial({
-        color: 0xbfd6ff, transparent: true, opacity: 0,
-        blending: THREE.NormalBlending, depthWrite: false
+      var mat = new THREE.MeshBasicMaterial({
+        color: 0x9fc9ff, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
       });
-      var loop = new THREE.Line(circleGeo, mat);
+      var loop = new THREE.Mesh(ringGeo, mat);
       loop.position.set(d.x, 0.02, d.z);
-      loop.scale.set(1, 1, 1);
+      loop.scale.set(0.01, 0.01, 1);
       loop.visible = false;
       scene.add(loop);
       r.loops.push(loop);
@@ -348,15 +338,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       r.radius += r.speed * dt;                  // 波纹带外沿整体向外推进
       for (var j = 0; j < r.loops.length; j++) {
         var rr = r.radius - j * r.wavelength;    // 第 j 个波峰环半径（j=0 为最外波峰）
-        if (rr <= 0.5) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
+        if (rr <= 0.3) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
         r.loops[j].visible = true;
         r.loops[j].scale.set(rr, rr, 1);
-        var falloff = Math.pow(0.68, j);         // 内圈波峰渐暗（真实波纹衰减）
-        // 从中心淡入浮现（半径小→透明度低），随扩散渐亮
-        var appear = THREE.MathUtils.smoothstep(0, 2, r.radius);
-        // 波纹带传播的前 60% 保持清晰，接近水面边界(目标)的最后 40% 渐隐直至消散
-        var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.6 * r.maxR) / (0.4 * r.maxR), 0, 1);
-        r.loops[j].material.opacity = Math.max(0, 0.6 * falloff * fade * appear);
+        var falloff = Math.pow(0.7, j);          // 内圈波峰渐暗（真实波纹衰减）
+        // 波纹带传播的前 65% 保持清晰，接近水面边界(目标)的最后 35% 渐隐直至消散
+        var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.65 * r.maxR) / (0.35 * r.maxR), 0, 1);
+        r.loops[j].material.opacity = Math.max(0, 0.5 * falloff * fade);
       }
       if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
