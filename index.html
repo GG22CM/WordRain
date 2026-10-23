@@ -162,7 +162,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070f);
   var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
-  camera.position.set(0, 11, 14);        // 平衡俯角：波纹呈圆环扩散，且落点都在视野内
+  camera.position.set(0, 20, 20);        // 适中俯角：波纹可见，且修复后形状恒定（视角决定的椭圆）
   camera.lookAt(0, 1.6, 0);
 
   /* 光：柔和环境光让水面/雨滴有基础可见度 */
@@ -243,7 +243,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   function Drop(ch) {
     this.ch = ch;
     this.x = rand(-14, 14);
-    this.z = rand(-11, 8);                 // 纵深：远(-) 到 近(+)
+    this.z = rand(-11, 8);                 // 纵深：远(-) 到 近(+)，落点有足够扩散空间
     this.y = rand(9, 13.5);
     this.vy = rand(2.5, 6.5);
     this.gravity = rand(9, 14);
@@ -324,7 +324,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       });
       var loop = new THREE.Mesh(ringGeo, mat);
       loop.position.set(d.x, 0.02, d.z);
-      loop.scale.set(0.01, 0.01, 1);
+      loop.scale.set(0.01, 1, 0.01);   // 环在 XZ 平面：缩放 x 与 z，保持正圆等比扩散
       loop.visible = false;
       scene.add(loop);
       r.loops.push(loop);
@@ -341,11 +341,12 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         var rr = r.radius - j * r.wavelength;    // 第 j 个波峰环半径（j=0 为最外波峰）
         if (rr <= 0.3) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
         r.loops[j].visible = true;
-        r.loops[j].scale.set(rr, rr, 1);
+        r.loops[j].scale.set(rr, 1, rr);   // 修正：缩放 x 与 z（y 恒 0），正圆等比扩散，投影恒定椭圆
         var falloff = Math.pow(0.55, j);         // 最外波峰(传播前沿)最亮，尾波快速渐暗 → 波浪推进感
-        // 波纹带传播的前 65% 保持清晰，接近水面边界(目标)的最后 35% 渐隐直至消散
-        var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.65 * r.maxR) / (0.35 * r.maxR), 0, 1);
-        r.loops[j].material.opacity = Math.max(0, 0.55 * falloff * fade);
+        // 波纹从很小半径(rr≈0.3)开始扩散，全程保持清晰可见（不靠淡入，避免透明不可见）
+        // 传播的前 70% 保持亮度，接近水面边界(目标)的最后 30% 渐隐直至消散
+        var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.7 * r.maxR) / (0.3 * r.maxR), 0, 1);
+        r.loops[j].material.opacity = Math.max(0, 0.7 * falloff * fade);
       }
       if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
