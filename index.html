@@ -316,29 +316,27 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
   var ripples = [];                 // 活跃涟漪（线条）
 
-  function addRipple(d, t) {
-    // 水滴"大小"按纵深映射：近处(z大)=大滴 → 圈数多、涟漪大
+  function addRipple(d) {
+    // 水滴"大小"按纵深映射：近处(z大)=大滴 → 波峰环数多、波纹带更大
     var sf = THREE.MathUtils.clamp((d.z + 11) / 19, 0, 1);
-    var rings = 1 + Math.round(sf * 3);         // 小滴 1 圈，大滴最多 4 圈
-    var targetR = 4.5 + sf * 16;                 // 目标半径：小滴小、大滴大
-    var x = d.x, z = d.z;
-    var boundary = Math.min(48 - Math.abs(x), 20 - Math.abs(z));  // 到水面边界的距离
-    var grow = rand(3.2, 4.6);                  // 扩散速率
-    var stagger = 0.16;                          // 相邻圈出现间隔（逐圈泛起）
-    var r = { age: 0, x: x, z: z, grow: grow, stagger: stagger, loops: [], maxR: [], rings: rings };
+    var rings = 1 + Math.round(sf * 3);         // 波峰环数：小滴 1，大滴最多 4
+    var wavelength = 1.7;                        // 波峰间距：固定波长，环与环明显间隔（不黏连）
+    var targetR = 5 + sf * 14;                   // 波纹带目标外沿半径
+    var boundary = Math.min(48 - Math.abs(d.x), 20 - Math.abs(d.z)); // 到水面边界距离
+    var maxR = Math.min(targetR, boundary);      // 外沿最大半径（到边界即消散）
+    var speed = rand(3.2, 5.0);                  // 波纹带外扩速度
+    var r = { age: 0, x: d.x, z: d.z, radius: 0, speed: speed, wavelength: wavelength, rings: rings, maxR: maxR, loops: [] };
     for (var i = 0; i < rings; i++) {
       var mat = new THREE.LineBasicMaterial({
         color: 0xbfd6ff, transparent: true, opacity: 0,
         blending: THREE.NormalBlending, depthWrite: false
       });
       var loop = new THREE.Line(circleGeo, mat);
-      loop.position.set(x, 0.02, z);   // 略高于水面
+      loop.position.set(d.x, 0.02, d.z);
       loop.scale.set(1, 1, 1);
       loop.visible = false;
       scene.add(loop);
       r.loops.push(loop);
-      // 各圈最大半径逐圈略增，且不越过水面边界（到达边界即消散）
-      r.maxR.push(Math.min(targetR * (0.55 + i * 0.18), boundary));
     }
     ripples.push(r);
   }
@@ -347,23 +345,17 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     for (var i = ripples.length - 1; i >= 0; i--) {
       var r = ripples[i];
       r.age += dt;
-      var done = true;
+      r.radius += r.speed * dt;                  // 波纹带外沿整体向外推进
       for (var j = 0; j < r.loops.length; j++) {
-        var delay = j * r.stagger;
-        if (r.age < delay) { r.loops[j].visible = false; continue; }
-        var rad = r.grow * (r.age - delay);
-        var maxR = r.maxR[j];
-        if (rad >= maxR) {          // 已扩散到最大半径（目标或水面边界）→ 消散
-          r.loops[j].visible = false;
-          continue;
-        }
-        done = false;
+        var rr = r.radius - j * r.wavelength;    // 第 j 个波峰环半径（j=0 为最外波峰）
+        if (rr <= 0.5) { r.loops[j].visible = false; continue; } // 该波峰尚未展开
         r.loops[j].visible = true;
-        r.loops[j].scale.set(rad, rad, 1);
-        // 接近最大半径(目标/边界)渐隐，到边界时恰好消失 → 让用户感知水面边界
-        r.loops[j].material.opacity = 0.55 * (1 - rad / maxR);
+        r.loops[j].scale.set(rr, rr, 1);
+        var falloff = Math.pow(0.62, j);         // 内圈波峰渐暗（真实波纹衰减）
+        var fade = 1 - r.radius / r.maxR;        // 整组随接近边界/目标渐隐
+        r.loops[j].material.opacity = Math.max(0, 0.6 * falloff * fade);
       }
-      if (done) removeRipple(i);
+      if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
   }
 
@@ -418,8 +410,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       var d = drops[j];
       d.vy += d.gravity * dt;              // 重力加速
       d.y -= d.vy * dt;
-      if (d.y <= 0) {                       // 没入水面：按水滴大小泛起多圈涟漪并消失
-        addRipple(d, t);
+      if (d.y <= 0) {                       // 没入水面：按水滴大小泛起波纹带并消失
+        addRipple(d);
         killDrop(d);
         drops.splice(j, 1);
         continue;
