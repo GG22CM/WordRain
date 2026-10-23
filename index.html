@@ -172,14 +172,16 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   light.position.set(3, 8, 6);
   scene.add(light);
 
-  /* ===== 水面星河倒影（Points + 星云）：全部星星作为水面倒影，循环流动、永不消失，空中无星星 ===== */
-  var REFL_DRIFT = 2.2;   // 倒影横向漂移速度（单位/秒）
+  /* ===== 水面星河倒影：繁星散乱铺满河面、各自缓慢流动、永不消失，空中无星星 ===== */
+  var REFL_DRIFT = 0.6;   // 整体缓慢向右的漂移分量（很小，主要靠每颗星各自流动）
   function buildReflection(count, size, color, opacity) {
     var pos = new Float32Array(count * 3);
+    var spd = new Float32Array(count);             // 每颗星独立的横向漂移速度 → 散乱错落、有流动感
     for (var i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 88;      // x：水面横向范围
-      pos[i * 3 + 1] = -0.6 - Math.random() * 5;    // y：紧贴水面下方（浅，像水面的倒影）
-      pos[i * 3 + 2] = -4 - Math.random() * 16;     // z：水面纵深
+      pos[i * 3] = (Math.random() - 0.5) * 92;      // x：铺满河面横向
+      pos[i * 3 + 1] = -0.5 - Math.random() * 5;    // y：紧贴水面下方（浅，像水面的倒影）
+      pos[i * 3 + 2] = -2.5 - Math.random() * 17.5; // z：铺满河面纵深
+      spd[i] = -0.55 + Math.random() * 1.1;         // 每颗星速度各不相同
     }
     var g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -187,20 +189,24 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
       color: color, size: size, transparent: true, opacity: opacity,
       blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
     });
-    return new THREE.Points(g, m);
+    var pts = new THREE.Points(g, m);
+    pts.userData.speeds = spd;
+    return pts;
   }
-  // 倒影横向循环漂移：所有点向右缓慢流动，超出水面右缘回绕到左缘 → 星河在水面持续流动、永不消失
+  // 每颗星以各自速度横向漂移（叠加整体缓流），超出河面回绕到另一侧 → 繁星铺满、缓慢流动、永不消失
   function driftReflection(pts, dt) {
     var arr = pts.geometry.attributes.position.array;
+    var spd = pts.userData.speeds;
     for (var i = 0; i < arr.length; i += 3) {
-      arr[i] += REFL_DRIFT * dt;
-      if (arr[i] > 44) arr[i] -= 88;   // 回绕（右→左）
-      else if (arr[i] < -44) arr[i] += 88;
+      arr[i] += (spd[i / 3] + REFL_DRIFT) * dt;
+      if (arr[i] > 46) arr[i] -= 92;
+      else if (arr[i] < -46) arr[i] += 92;
     }
     pts.geometry.attributes.position.needsUpdate = true;
   }
-  var reflection = buildReflection(isMobile ? 700 : 900, 0.5, 0xbfd6ff, 0.75);
-  var brightReflection = buildReflection(130, 0.95, 0xe8f1ff, 0.85);
+  // 主体：大量细密星点（繁星铺满）；亮星：少量较大亮星点缀（像夜空亮星），两者都缓慢流动
+  var reflection = buildReflection(isMobile ? 2400 : 3600, 0.24, 0xcfe4ff, 0.9);
+  var brightReflection = buildReflection(isMobile ? 220 : 320, 0.6, 0xeef4ff, 0.95);
   scene.add(reflection);
   scene.add(brightReflection);
 
