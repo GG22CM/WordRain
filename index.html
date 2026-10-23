@@ -162,8 +162,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070f);
   var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 400);
-  camera.position.set(0, 15, 10);        // 高俯角看水面：波纹呈圆环向四周扩散
-  camera.lookAt(0, 1, 0);
+  camera.position.set(0, 11, 14);        // 平衡俯角：波纹呈圆环扩散，且落点都在视野内
+  camera.lookAt(0, 1.6, 0);
 
   /* 光：柔和环境光让水面/雨滴有基础可见度 */
   var hemi = new THREE.HemisphereLight(0xbfe0ff, 0x0a1030, 1.0);
