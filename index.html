@@ -300,7 +300,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   }
 
   /* ===== 涟漪：波峰环带（Mesh 圆环，有宽度、发光、配合 Bloom） ===== */
-  var ringGeo = new THREE.RingGeometry(0.92, 1.0, 72);   // 单位环带（很窄：波峰带细、波谷空隙大）
+  var ringGeo = new THREE.RingGeometry(0.985, 1.0, 72);   // 极窄环带：波峰呈一条细线，波谷空隙大
   ringGeo.rotateX(-Math.PI / 2);                          // 转到水平 XZ 平面
   ringGeo.computeVertexNormals();
 
@@ -346,7 +346,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         // 波纹从很小半径(rr≈0.3)开始扩散，全程保持清晰可见（不靠淡入，避免透明不可见）
         // 传播的前 70% 保持亮度，接近水面边界(目标)的最后 30% 渐隐直至消散
         var fade = 1 - THREE.MathUtils.clamp((r.radius - 0.7 * r.maxR) / (0.3 * r.maxR), 0, 1);
-        r.loops[j].material.opacity = Math.max(0, 0.7 * falloff * fade);
+        r.loops[j].material.opacity = Math.max(0, 0.32 * falloff * fade);
       }
       if (r.radius >= r.maxR) removeRipple(i);   // 外沿到边界/目标 → 整组消散
     }
@@ -366,9 +366,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   composer.addPass(new RenderPass(scene, camera));
   var bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    isMobile ? 0.35 : 0.6,   // strength
-    0.6,                       // radius
-    0.18                       // threshold
+    isMobile ? 0.15 : 0.22,  // strength（调低：只做柔和的辉光晕染，不再整屏发亮）
+    0.5,                       // radius
+    0.5                        // threshold（提高：仅最亮的文字雨滴轻微发光，波纹/星星不触发）
   );
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
