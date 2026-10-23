@@ -239,7 +239,6 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
   var GHOST_MAX = isMobile ? 80 : 100;
   var drops = [];
   var ghosts = [];
-  var RIPPLE_MAX = 16;
 
   function Drop(ch) {
     this.ch = ch;
@@ -300,70 +299,82 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     if (sp.material) sp.material.dispose();
   }
 
-  /* ===== 3D 水面：顶点扰动涟漪 Shader ===== */
-  var RIPPLE_UNIFORMS = 16;
-  var ripples = [];
-  var uniformRipples = [];
-  for (var ri = 0; ri < RIPPLE_UNIFORMS; ri++) uniformRipples.push(new THREE.Vector3(0, 0, -1000));
+  /* ===== 涟漪：多圈环形线条（按水滴大小决定圈数，扩散至水面边界消散） ===== */
+  var CIRCLE_SEG = 48;
+  var circleGeo = (function () {
+    var pos = new Float32Array(CIRCLE_SEG * 3);
+    for (var i = 0; i < CIRCLE_SEG; i++) {
+      var a = (i / CIRCLE_SEG) * Math.PI * 2;
+      pos[i * 3] = Math.cos(a);
+      pos[i * 3 + 1] = 0;
+      pos[i * 3 + 2] = Math.sin(a);
+    }
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return g;
+  })();
 
-  var waterUniforms = {
-    uTime: { value: 0 },
-    uRipples: { value: uniformRipples },
-    uRippleCount: { value: 0 }
-  };
+  var ripples = [];                 // 活跃涟漪（线条）
 
-  var waterVert = /* glsl */`
-    uniform float uTime;
-    uniform vec3 uRipples[16];
-    uniform int uRippleCount;
-    varying float vDisp;
-    void main() {
-      vec3 pos = position;
-      float disp = 0.0;
-      for (int i = 0; i < 16; i++) {
-        if (i >= uRippleCount) break;
-        vec3 rp = uRipples[i];
-        float t = uTime - rp.z;
-        if (t <= 0.0 || t >= 1.4) continue;
-        float d = distance(vec2(pos.x, pos.z), vec2(rp.x, rp.y));
-        float rad = t * 8.0;
-        float env = exp(-(d * d) / (rad * rad * 0.55));
-        float wave = sin(rad * 2.8 - t * 12.0);
-        disp += env * wave * 0.32 * (1.0 - t / 1.4);
+  function addRipple(d, t) {
+    // 水滴"大小"按纵深映射：近处(z大)=大滴 → 圈数多、涟漪大
+    var sf = THREE.MathUtils.clamp((d.z + 11) / 19, 0, 1);
+    var rings = 1 + Math.round(sf * 3);         // 小滴 1 圈，大滴最多 4 圈
+    var targetR = 4.5 + sf * 16;                 // 目标半径：小滴小、大滴大
+    var x = d.x, z = d.z;
+    var boundary = Math.min(48 - Math.abs(x), 20 - Math.abs(z));  // 到水面边界的距离
+    var grow = rand(3.2, 4.6);                  // 扩散速率
+    var stagger = 0.16;                          // 相邻圈出现间隔（逐圈泛起）
+    var r = { age: 0, x: x, z: z, grow: grow, stagger: stagger, loops: [], maxR: [], rings: rings };
+    for (var i = 0; i < rings; i++) {
+      var mat = new THREE.LineBasicMaterial({
+        color: 0xbfd6ff, transparent: true, opacity: 0,
+        blending: THREE.NormalBlending, depthWrite: false
+      });
+      var loop = new THREE.Line(circleGeo, mat);
+      loop.position.set(x, 0.02, z);   // 略高于水面
+      loop.scale.set(1, 1, 1);
+      loop.visible = false;
+      scene.add(loop);
+      r.loops.push(loop);
+      // 各圈最大半径逐圈略增，且不越过水面边界（到达边界即消散）
+      r.maxR.push(Math.min(targetR * (0.55 + i * 0.18), boundary));
+    }
+    ripples.push(r);
+  }
+
+  function updateRipples(dt) {
+    for (var i = ripples.length - 1; i >= 0; i--) {
+      var r = ripples[i];
+      r.age += dt;
+      var done = true;
+      for (var j = 0; j < r.loops.length; j++) {
+        var delay = j * r.stagger;
+        if (r.age < delay) { r.loops[j].visible = false; continue; }
+        var rad = r.grow * (r.age - delay);
+        var maxR = r.maxR[j];
+        if (rad >= maxR) {          // 已扩散到最大半径（目标或水面边界）→ 消散
+          r.loops[j].visible = false;
+          continue;
+        }
+        done = false;
+        r.loops[j].visible = true;
+        r.loops[j].scale.set(rad, rad, 1);
+        // 接近最大半径(目标/边界)渐隐，到边界时恰好消失 → 让用户感知水面边界
+        r.loops[j].material.opacity = 0.55 * (1 - rad / maxR);
       }
-      pos.y = disp;
-      vDisp = disp;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      if (done) removeRipple(i);
     }
-  `;
-  var waterFrag = /* glsl */`
-    uniform float uTime;
-    varying float vDisp;
-    void main() {
-      // 水面颜色与夜空背景一致（#05070f），本身完全透明、无边框
-      vec3 base = vec3(0.02, 0.03, 0.05);
-      float glow = max(0.0, vDisp);
-      // 仅涟漪隆起瞬间产生极低调微光，其余全透明 → 无颜色、无边框，倒影直接透出
-      float vis = smoothstep(0.0, 0.08, glow);
-      vec3 col = base + vec3(0.35, 0.38, 0.45) * glow * 0.35;
-      float alpha = 0.5 * vis;
-      gl_FragColor = vec4(col, alpha);
-    }
-  `;
+  }
 
-  var waterGeo = new THREE.PlaneGeometry(96, 40, 64, 28);
-  waterGeo.rotateX(-Math.PI / 2);       // 变为水平 XZ 平面，y=0
-  var waterMat = new THREE.ShaderMaterial({
-    uniforms: waterUniforms,
-    vertexShader: waterVert,
-    fragmentShader: waterFrag,
-    side: THREE.FrontSide,
-    transparent: true,
-    depthWrite: false
-  });
-  var water = new THREE.Mesh(waterGeo, waterMat);
-  water.position.y = 0;
-  scene.add(water);
+  function removeRipple(idx) {
+    var r = ripples[idx];
+    for (var i = 0; i < r.loops.length; i++) {
+      scene.remove(r.loops[i]);
+      if (r.loops[i].material) r.loops[i].material.dispose();
+    }
+    ripples.splice(idx, 1);
+  }
 
   /* ===== Bloom 后处理 ===== */
   var composer = new EffectComposer(renderer);
@@ -399,25 +410,16 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     starsMirror.rotation.y = t * 0.008;
     brightMirror.rotation.y = t * 0.012;
 
-    // 涟漪 uniform 更新
-    waterUniforms.uTime.value = t;
-    waterUniforms.uRippleCount.value = ripples.length;
-    for (var i = 0; i < RIPPLE_UNIFORMS; i++) {
-      if (i < ripples.length) {
-        uniformRipples[i].set(ripples[i].x, ripples[i].z, ripples[i].t);
-      } else {
-        uniformRipples[i].set(0, 0, -1000);
-      }
-    }
+    // 涟漪线条更新
+    updateRipples(dt);
 
     // 雨滴更新
     for (var j = drops.length - 1; j >= 0; j--) {
       var d = drops[j];
       d.vy += d.gravity * dt;              // 重力加速
       d.y -= d.vy * dt;
-      if (d.y <= 0) {                       // 没入水面：泛起涟漪并消失
-        ripples.push({ x: d.x, z: d.z, t: t });
-        if (ripples.length > RIPPLE_MAX) ripples.shift();
+      if (d.y <= 0) {                       // 没入水面：按水滴大小泛起多圈涟漪并消失
+        addRipple(d, t);
         killDrop(d);
         drops.splice(j, 1);
         continue;
